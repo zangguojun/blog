@@ -49,9 +49,7 @@ export default function PostLayout({ content, next, prev, children }: LayoutProp
             </div>
             {siteMetadata.comments && (
               <div className="pt-6 pb-6 text-center text-gray-700 dark:text-gray-300" id="comment">
-                {!loadComments && (
-                  <button onClick={() => setLoadComments(true)}>加载评论</button>
-                )}
+                {!loadComments && <button onClick={() => setLoadComments(true)}>加载评论</button>}
                 {loadComments && <Comments commentsConfig={siteMetadata.comments} slug={slug} />}
               </div>
             )}
