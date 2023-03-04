@@ -1,0 +1,201 @@
+---
+title: 02 实现jsx转换以及打包
+date: '2023-01-30 22:45:30 +0800'
+tags: ['react源码']
+---
+
+> 使用 rollup 打包（rollup 在不适用 ts-node 等运行时，必须使用 js 文件）
+> getBaseRollupPlugins 为 ts、commjs 插件集合
+> generatePackageJson 生成 package.json 文件
+
+```jsx
+export default [
+  {
+    input: `${pkgPath}/${module}`,
+    output: {
+      file: `${pkgDistPath}/index.js`,
+      name: "index.js",
+      format: "umd",
+    },
+    // 生成PackageJson
+    plugins: [
+      ...getBaseRollupPlugins(),
+      generatePackageJson({
+        inputFolder: pkgPath,
+        outputFolder: pkgDistPath,
+        baseContents: ({ name, version, description }) => ({
+          name,
+          version,
+          description,
+          main: "index.js",
+        }),
+      }),
+    ],
+  },
+  {
+    input: `${pkgPath}/src/jsx.ts`,
+    output: [
+      {
+        file: `${pkgDistPath}/jsx-runtime.js`,
+        name: "jsx-runtime.js",
+        format: "umd",
+      },
+      {
+        file: `${pkgDistPath}/jsx-dev-runtime.js`,
+        name: "jsx-dev-runtime.js",
+        format: "umd",
+      },
+    ],
+    plugins: getBaseRollupPlugins(),
+  },
+];
+```
+
+```typescript
+export type Type = any;
+export type ElementType = any;
+export type Key = any;
+export type Ref = any;
+export type Props = any;
+
+export interface ReactElementType {
+  $$typeof: symbol | number;
+   ElementType;
+  key: Key;
+  ref: Ref;
+  props: Props;
+  __mark: string;
+}
+```
+
+```typescript
+/**
+ * modify from
+ * const supportSymbol: boolean = typeof Symbol === 'function' && Symbol.for
+ * 是否支持symbol
+ */
+const supportSymbol: boolean = (typeof Symbol === "function" &&
+  Symbol.for) as boolean;
+
+/**
+ * $$typeof: REACT_ELEMENT_TYPE
+ * 为了防止滥用ReactElement
+ */
+export const REACT_ELEMENT_TYPE = supportSymbol
+  ? Symbol.for("react.createElement")
+  : 0xeac7;
+```
+
+```typescript
+import {
+  type Type,
+  type Key,
+  type Ref,
+  type Props,
+  type ReactElementType,
+  type ElementType,
+} from "shared/ReactTypes";
+import { REACT_ELEMENT_TYPE } from "shared/ReactSymbols";
+
+/**
+ * 创建ReactElement数据结构
+ * @param type div、span...
+ * @param key
+ * @param ref
+ * @param props
+ * @constructor
+ */
+export const ReactElement = (
+  type: Type,
+  key: Key,
+  ref: Ref,
+  props: Props
+): ReactElementType => {
+  return {
+    type,
+    key,
+    ref,
+    props,
+    $$typeof: REACT_ELEMENT_TYPE,
+    // 此字段为人为标记
+    __mark: "tong",
+  };
+};
+/**
+ * jsx 和 jsxDEV 区别在于；jsx不处理maybeChildren
+ * @param type
+ * @param config
+ * @param maybeChildren
+ */
+export const jsx = (
+  type: ElementType,
+  config: any,
+  ...maybeChildren: any[]
+): ReactElementType => {
+  let key: Key = null;
+  let ref: Ref = null;
+  const props: Props = {};
+  for (const prop in config) {
+    const val = config[prop];
+    /**
+     * key 和 ref 需要特殊处理
+     */
+    if (props === "key") {
+      if (val !== undefined) {
+        // key = "" + val
+        key = String(val);
+      }
+      continue;
+    }
+
+    if (props === "ref") {
+      if (val !== undefined) {
+        ref = val;
+      }
+      continue;
+    }
+
+    if ({}.hasOwnProperty.call(config, prop)) {
+      props[prop] = val;
+    }
+
+    const maybeChildrenLength = maybeChildren.length;
+    if (maybeChildrenLength !== 0) {
+      if (maybeChildrenLength === 1) {
+        props.children = maybeChildren[0];
+      } else {
+        props.children = maybeChildren;
+      }
+    }
+  }
+  return ReactElement(type, key, ref, props);
+};
+
+export const jsxDEV = (type: ElementType, config: any): ReactElementType => {
+  let key: Key = null;
+  let ref: Ref = null;
+  const props: Props = {};
+  for (const prop in config) {
+    const val = config[prop];
+    if (props === "key") {
+      if (val !== undefined) {
+        // key = "" + val
+        key = String(val);
+      }
+      continue;
+    }
+
+    if (props === "ref") {
+      if (val !== undefined) {
+        ref = val;
+      }
+      continue;
+    }
+
+    if ({}.hasOwnProperty.call(config, prop)) {
+      props[prop] = val;
+    }
+  }
+  return ReactElement(type, key, ref, props);
+};
+```

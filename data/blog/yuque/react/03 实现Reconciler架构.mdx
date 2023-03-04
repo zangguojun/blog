@@ -1,0 +1,226 @@
+---
+title: 03 实现Reconciler架构
+date: '2023-02-11 23:26:17 +0800'
+tags: ['react源码']
+---
+
+## 一、与 JQuery 的不同
+
+### 1、JQuery
+
+> 过程驱动
+> 开发者 手动调用 宿主环境 API
+
+![](https://cdn.jsdelivr.net/gh/zangguojun/tuchuang/yuque/FoANepEwccbqX_Le95r2WV4SaYgT.png)
+
+### 2、React & Vue
+
+> 状态驱动
+> **运行时核心模块** 调用 宿主环境 API
+>
+> - React ==> Reconciler
+
+![](https://cdn.jsdelivr.net/gh/zangguojun/tuchuang/yuque/Fsza-T9dPGWvcrH2MBp4RS7FQl1W.png)
+
+## 二、核心模块的数据结构？
+
+> Q：能否是 React Element?
+> A：不行
+>
+> - 无法表达节点之间的关系
+> - 无法表达状态（字段有限）
+>
+> A：数据结构（Fiber Node）特点
+>
+> - 介于真实 UI（DOM Element）和 React Element
+> - 需要表达节点直接的关系
+> - 方便拓展（作为数据存储 和 工作单元）
+
+## 三、reconciler 工作方式
+
+对于同一个节点，比较其 React Element 和 Fiber Node，**生成子 Fiber Node**，并根据结果**生成不同的标记**，在根据宿主环境的不同，执行对应的宿主 API
+
+当比较结束后，会生成一棵 Fiber Node 树，则会同时存在两颗 Fiber Node 树
+
+- current 树：与目前真实 UI 对应的 Fiber Node 树
+- workInProgress：触发更新后，正在 reconciler 中计算的 Fiber Node 树
+
+**即 双缓存机制**
+
+```typescript
+// Fiber Node是什么类型的节点
+export type workTags =
+  | typeof FunctionComponent
+  | typeof HostRoot
+  | typeof HostComponent
+  | typeof HostText;
+
+export const HostRoot = 3;
+
+/**
+ * function App () {}
+ * <App /> 为FunctionComponent
+ */
+export const FunctionComponent = 0;
+
+/**
+ * <div>123</div>
+ * + div为HostComponent
+ * + 123为HostText
+ */
+export const HostComponent = 5;
+export const HostText = 6;
+```
+
+```typescript
+export type Flags = number;
+
+export const NoFlags = 0b0000001;
+export const Placement = 0b0000010;
+export const Update = 0b0000100;
+export const ChildrenDeletion = 0b0000100;
+```
+
+```typescript
+import { type Key, type Props, type Ref } from "shared/ReactTypes";
+import { type workTags } from "./workTags";
+import { type Flags, NoFlags } from "./fiberFlags";
+
+export class FiberNode {
+  key: Key;
+  ref: Ref;
+  tag: workTags;
+  statusNode: any;
+  type: any;
+
+  return: FiberNode | null;
+  child: FiberNode | null;
+  sibling: FiberNode | null;
+  index: number;
+
+  pendingProps: Props;
+  memoizedProps: Props | null;
+  memoizedState: any | null;
+  updateQueue: any;
+
+  alternate: FiberNode | null;
+  flags: Flags;
+
+  constructor(tag: workTags, pendingProps: Props, key: Key) {
+    /**
+     * 作为数据存储
+     */
+    this.key = key;
+    this.ref = null;
+    // 工作节点的Tag类型
+    this.tag = tag;
+    // 对于tag为5(HostComponent的div)，statusNode就表示div的DOM
+    this.statusNode = null;
+    // 对于tag为1(FunctionComponent)，type就表示函数本身() => {}
+    this.type = null;
+
+    /**
+     * 表达节点之间的关系，构成树状结构
+     */
+    // 指向父FiberNode
+    this.return = null;
+    // 指向子FiberNode
+    this.child = null;
+    // 指向相邻FiberNode
+    this.sibling = null;
+    // 兄弟节点的顺序
+    this.index = 0;
+
+    /**
+     * 作为工作单元
+     */
+    // 准备工作时的状态
+    this.pendingProps = pendingProps;
+    // 完成工作时的状态
+    this.memoizedProps = null;
+    // 完成工作时的状态
+    this.memoizedState = null;
+    // 更新队列
+    this.updateQueue = null;
+
+    // 指向workInProgress和current
+    this.alternate = null;
+    // 副作用
+    this.flags = NoFlags;
+  }
+}
+```
+
+```typescript
+import { type FiberNode, type FiberRootNode, workInProcess } from "./fiber";
+import { beginWork } from "./beginWork";
+import { completeWork } from "./completeWork";
+
+let workInProgress: FiberNode | null = null;
+
+/**
+ * 调用者为触发更新的api，如render、state
+ * @param root
+ */
+const renderRoot = (root: FiberRootNode) => {
+  // 初始化
+  prepareRefreshStack(root);
+
+  do {
+    try {
+      workLoop();
+      break;
+    } catch (e) {
+      console.error("WorkLoop Error", e);
+      workInProgress = null;
+    }
+  } while (true);
+};
+
+/**
+ * 将wip设置为第一个遍历的Fiber Node
+ * @param root
+ */
+const prepareRefreshStack = (root: FiberRootNode): void => {
+  workInProgress = root;
+};
+
+const workLoop = (): void => {
+  while (workInProgress !== null) {
+    performUnitOfWork(workInProgress);
+  }
+};
+
+/**
+ * 递 阶段
+ */
+const performUnitOfWork = (fiber: FiberNode): void => {
+  // 有子节点 遍历子节点
+  const next = beginWork(fiber);
+  fiber.memoizedProps = fiber.pendingProps;
+  // 说明 递 结束了；准备开始 归 了
+  if (next === null) {
+    completeUnitOfWork(fiber);
+  } else {
+    workInProgress = fiber;
+  }
+};
+
+/**
+ * 归 阶段
+ */
+const completeUnitOfWork = (fiber: FiberNode | null) => {
+  let node: FiberNode | null = fiber;
+  do {
+    // 没有子节点 遍历兄弟节点以及父节点
+    completeWork(node);
+    const sibling = node.sibling;
+    if (sibling !== null) {
+      workInProgress = sibling;
+      return;
+    }
+    node = node.return;
+    workInProgress = node;
+  } while (node !== null);
+};
+```

@@ -1,0 +1,61 @@
+---
+title: dotenv
+date: '2022-12-19 00:46:13 +0800'
+tags: ['工具库']
+---
+
+> 相关链接：
+>
+> -
+
+### 学到了！
+
+```javascript
+const re = /^dotenv_config_(encoding|path|debug)=(.+)$/
+
+module.exports = function optionMatcher (args) {
+  return args.reduce(function (acc, cur) {
+    const matches = cur.match(re)
+    if (matches) {
+      acc[matches[1]] = matches[2]
+    }
+    return acc
+  }, {})
+}
+// 输入
+[
+  'dotenv_config_encoding=utf8',
+  'dotenv_config_path=/custom/path/to/your/env/vars',
+  'dotenv_config_debug=true',
+  'dotenv_config_override=true'
+]
+// 输入
+{
+  dotenv_config_encoding: 'utf8',
+  dotenv_config_path: '/custom/path/to/your/env/vars',
+  dotenv_config_debug: 'true',
+  dotenv_config_override: 'true'
+}
+```
+
+```javascript
+const options = {};
+
+if (process.env.DOTENV_CONFIG_ENCODING != null) {
+  options.encoding = process.env.DOTENV_CONFIG_ENCODING;
+}
+
+if (process.env.DOTENV_CONFIG_PATH != null) {
+  options.path = process.env.DOTENV_CONFIG_PATH;
+}
+
+if (process.env.DOTENV_CONFIG_DEBUG != null) {
+  options.debug = process.env.DOTENV_CONFIG_DEBUG;
+}
+
+if (process.env.DOTENV_CONFIG_OVERRIDE != null) {
+  options.override = process.env.DOTENV_CONFIG_OVERRIDE;
+}
+
+module.exports = options;
+```

@@ -1,0 +1,232 @@
+---
+title: 04 如何触发更新
+date: '2023-02-12 17:02:16 +0800'
+tags: ['react源码']
+---
+
+## 一、定义 更新相关的数据结构以及方法
+
+```typescript
+import { type Action } from "shared/ReactTypes";
+
+/**
+ * 定义 Update 数据结构
+ */
+export interface Update<State> {
+  action: Action<State>;
+}
+
+/**
+ * 定义 UpdateQueue数据结构
+ */
+export interface UpdateQueue<State> {
+  shared: {
+    pending: Update<State> | null;
+  };
+}
+
+/**
+ * 创建Update实例
+ * @param action
+ */
+export const createUpdate = <State>(action: Action<State>): Update<State> => {
+  return {
+    action,
+  };
+};
+
+/**
+ * 创建UpdateQueue的实例
+ */
+export const createUpdateQueue = <State>(): UpdateQueue<State> => {
+  return {
+    shared: {
+      pending: null,
+    },
+  };
+};
+
+/**
+ * 向UpdateQueue里面插入Update的方法
+ * @param updateQueue
+ * @param update
+ */
+export const enqueueUpdate = <State>(
+  updateQueue: UpdateQueue<State>,
+  update: Update<State>
+): void => {
+  updateQueue.shared.pending = update;
+};
+
+/**
+ * 消费Update的方法
+ * @param baseState
+ * @param pendingUpdate
+ */
+export const processUpdateQueue = <State>(
+  baseState: State,
+  pendingUpdate: Update<State> | null
+): { memoizedState: State } => {
+  const result: ReturnType<typeof processUpdateQueue<State>> = {
+    memoizedState: baseState,
+  };
+  if (pendingUpdate !== null) {
+    const action = pendingUpdate.action;
+    // 与setState一致
+    if (action instanceof Function) {
+      result.memoizedState = action(baseState);
+    } else {
+      result.memoizedState = action;
+    }
+  }
+  return result;
+};
+```
+
+![](https://cdn.jsdelivr.net/gh/zangguojun/tuchuang/yuque/FlU0ibkQJlaWYYbQ7F6f8yE0GuuH.png)
+![](https://cdn.jsdelivr.net/gh/zangguojun/tuchuang/yuque/Fi4cv6eOf76_ym8ubg-jLSOB2D40.png)
+
+> 考虑的事情：
+>
+> - 需要寻找根节点
+> - 统一的根节点是 FiberRootNode
+
+## 二、`React.createRoot(DOM).render(<App/>)`做了什么？
+
+```typescript
+// 描述宿主环境，不同宿主环境描述不同
+export type Container = any;
+```
+
+```typescript
+import { type ReactElementType } from "shared/ReactTypes";
+import { type Container } from "hostConfig";
+import { FiberNode, FiberRootNode } from "./fiber";
+import { HostRoot } from "./workTags";
+import { createUpdate, createUpdateQueue, enqueueUpdate } from "./updateQueue";
+
+/**
+ * React.createRoot(DOM).render(<App/>)
+ */
+/**
+ * 执行createRoot(DOM)方法时调用
+ * @param container
+ */
+export const createContainer = (container: Container): FiberRootNode => {
+  // 新建 hostRootFiber 和 FiberRootNode，并将两者产生关联
+  const hostRootFiber = new FiberNode(HostRoot, {}, null);
+  const root = new FiberRootNode(container, hostRootFiber);
+  // 给hostRootFiber创建updateQueue（与更新机制相关联）
+  hostRootFiber.updateQueue = createUpdateQueue();
+  return root;
+};
+
+/**
+ * 执行render(<App/>)方法时调用
+ * @param element ReactElement
+ * @param root
+ */
+export const updateContainer = (
+  element: ReactElementType | null,
+  root: FiberRootNode
+): ReactElementType | null => {
+  const hostRootFiber = root.current;
+  // 创建一个element相关的Update
+  const update = createUpdate(element);
+  // 将上述Update插入hostRootFiber的UpdateQueue
+  enqueueUpdate(hostRootFiber.updateQueue, update);
+  return element;
+};
+```
+
+## 三、寻找根节点 FiberRootNode
+
+```typescript
+/**
+ * 找到根FiberNode节点
+ * @param fiber
+ */
+const markUpdateFromFiberToRoot = (fiber: FiberNode) => {
+  // 当前节点
+  let node = fiber;
+  // 当前节点的父节点
+  let parent = fiber.return;
+  while (parent !== null) {
+    // 存在parent，则为普通FiberNode
+    node = parent;
+    parent = parent.return;
+  }
+  // 说明不为普通FiberNode
+  if (node.tag === HostRoot) {
+    // 说明为 HostRootFiber
+    return node.statusNode;
+  }
+
+  return null;
+};
+```
+
+## 四、创建 wip
+
+```typescript
+/**
+ * 创建wip，也就是另一个 HostRootFiber，两者通过alternate连接
+ * @param current 也就是现在展示的HostRootFiber
+ * @param pendingProps
+ */
+export const createWorkInProcess = (
+  current: FiberNode,
+  pendingProps: Props
+): FiberNode => {
+  let wip = current.alternate;
+  if (wip === null) {
+    // mount（首屏渲染）
+    wip = new FiberNode(current.tag, pendingProps, current.key);
+    wip.statusNode = current.statusNode;
+
+    wip.alternate = current;
+    current.alternate = wip;
+  } else {
+    // update
+    wip.pendingProps = current.pendingProps;
+    wip.flags = NoFlags;
+  }
+  wip.type = current.type;
+  wip.updateQueue = current.updateQueue;
+  wip.child = current.child;
+  wip.memoizedState = current.memoizedState;
+  wip.memoizedProps = current.memoizedProps;
+
+  return wip;
+};
+```
+
+```typescript
+/**
+ * 调用者为触发更新的api，如render、state
+ * @param root
+ */
+const renderRoot = (root: FiberRootNode): void => {
+  // 初始化
+  prepareRefreshStack(root);
+
+  do {
+    try {
+      workLoop();
+      break;
+    } catch (e) {
+      console.error("WorkLoop Error", e);
+      workInProgress = null;
+    }
+  } while (true);
+};
+
+/**
+ * 将wip设置为第一个遍历的Fiber Node
+ * @param root
+ */
+const prepareRefreshStack = (root: FiberRootNode): void => {
+  // FiberRootNode并不是一个普通的Fiber，不能直接作为wip
+  workInProgress = createWorkInProcess(root.current, {});
+};
+```

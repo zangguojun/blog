@@ -1,0 +1,102 @@
+---
+title: install-pkg
+date: '2022-12-21 22:46:16 +0800'
+tags: ['工具库']
+---
+
+> 相关链接：
+>
+> -
+
+### 学到了！
+
+```javascript
+export async function detectPackageManager(
+  cwd = process.cwd()
+): Promise<Agent | null> {
+  let agent: Agent | null = null;
+  // 通过LOCK文件来试探 包管理器
+  const lockPath = await findUp(Object.keys(LOCKS), { cwd });
+  let packageJsonPath: string | undefined;
+
+  if (lockPath) packageJsonPath = path.resolve(lockPath, "../package.json");
+  else packageJsonPath = await findUp("package.json", { cwd });
+  // 找到packageJsonPath
+  if (packageJsonPath && fs.existsSync(packageJsonPath)) {
+    try {
+      // 读取并parse package文件
+      const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+      // 读取packageManager
+      if (typeof pkg.packageManager === "string") {
+        const [name, version] = pkg.packageManager.split("@");
+        if (name === "yarn" && parseInt(version) > 1) agent = "yarn@berry";
+        else if (name === "pnpm" && parseInt(version) < 7) agent = "pnpm@6";
+        else if (name in AGENTS) agent = name;
+        else console.warn("[ni] Unknown packageManager:", pkg.packageManager);
+      }
+    } catch {}
+  }
+
+  // 无package.json的packageManager字段，则完全基于LOCK文件
+  if (!agent && lockPath) agent = LOCKS[path.basename(lockPath)];
+
+  return agent;
+}
+```
+
+```javascript
+execa(
+  // 包管理器
+  agent,
+  [
+    agent === "yarn" ? "add" : "install",
+    options.dev ? "-D" : "",
+    // options.additionalArgs
+    ...args,
+    // 要下载的包
+    ...names,
+  ].filter(Boolean),
+  {
+    // stdio方式
+    stdio: options.silent ? "ignore" : "inherit",
+    // 执行的路径
+    cwd: options.cwd,
+  }
+);
+```
+
+```javascript
+  "dependencies": {
+    // 执行命令行
+    "execa": "^5.1.1",
+    // 查找文件
+    "find-up": "^5.0.0"
+  },
+  "devDependencies": {
+    // eslint规则，推荐xo
+    "@antfu/eslint-config": "^0.27.0",
+    // 自动根据LOCK文件寻找包管理器
+    "@antfu/ni": "^0.18.0",
+    "@types/node": "^16.11.59",
+    // 交互式提升版本号
+    "bumpp": "^8.2.1",
+    "eslint": "^8.23.1",
+    // 也就是tsx/cli：https://github.com/esbuild-kit/tsx/blob/develop/src/cli.ts
+    "esno": "^0.16.3",
+    // ts打包 最简单、最快的方法。
+    "tsup": "^6.2.3",
+    "typescript": "^4.8.3"
+  }
+```
+
+```javascript
+"scripts": {
+  "prepublishOnly": "nr build",
+  "dev": "nr build --watch",
+  // 也就是tsx/cli
+  "start": "esno src/index.ts",
+  "build": "tsup src/index.ts --format cjs,esm --dts --no-splitting",
+  "release": "bumpp --commit --push --tag && pnpm publish",
+  "lint": "eslint ."
+},
+```
