@@ -12,9 +12,7 @@ export default function FourZeroFour() {
           </h1>
         </div>
         <div className="max-w-md">
-          <p className="mb-4 text-xl font-bold leading-normal md:text-2xl">
-            抱歉，该页面不存在
-          </p>
+          <p className="mb-4 text-xl font-bold leading-normal md:text-2xl">抱歉，该页面不存在</p>
           <p className="mb-8">如有疑问，请联系我</p>
           <Link
             href="/"
